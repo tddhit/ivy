@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"fmt"
 	"net"
 )
 
@@ -17,7 +18,17 @@ func NewClient(peer string) *Client {
 		panic(err)
 	}
 	c.conn = NewConn(conn)
+	go c.read()
 	return c
+}
+
+func (c *Client) read() {
+	for {
+		data := c.conn.read()
+		var rsp int
+		Decode(data, &rsp)
+		fmt.Println(rsp)
+	}
 }
 
 func (c *Client) Call(req *Request) {
