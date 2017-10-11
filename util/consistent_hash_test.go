@@ -13,10 +13,6 @@ func TestConsistentHash(t *testing.T) {
 	rnodes = append(rnodes, RNode{"127.0.0.4", 2})
 	rnodes = append(rnodes, RNode{"127.0.0.5", 1})
 	hashRing := NewConsistentHash(rnodes, 10)
-	fmt.Println(hashRing.GetNode("abc"))
-	fmt.Println(hashRing.GetNode("abcd"))
 	hashRing.AddNode(RNode{"127.0.0.6", 2})
-	fmt.Println(hashRing.GetNode("abc"))
 	hashRing.RemoveNode(RNode{"127.0.0.5", 1})
-	fmt.Println(hashRing.GetNode("abc"))
 }

@@ -16,8 +16,8 @@ type ConsistentHash struct {
 }
 
 type RNode struct {
-	id     string
-	weight int
+	Id     string
+	Weight int
 }
 
 type iVNode struct {
@@ -48,19 +48,19 @@ func NewConsistentHash(rnodes []RNode, vprNum int) *ConsistentHash {
 	hashRing.vprNum = vprNum
 	hashRing.rnodes = make(map[string]RNode)
 	for _, v := range rnodes {
-		hashRing.rnodes[v.id] = v
+		hashRing.rnodes[v.Id] = v
 	}
 	hashRing.adjust()
 	return hashRing
 }
 
 func (this *ConsistentHash) AddNode(rnode RNode) {
-	this.rnodes[rnode.id] = rnode
+	this.rnodes[rnode.Id] = rnode
 	this.adjust()
 }
 
 func (this *ConsistentHash) RemoveNode(rnode RNode) {
-	delete(this.rnodes, rnode.id)
+	delete(this.rnodes, rnode.Id)
 	this.adjust()
 }
 
@@ -77,10 +77,10 @@ func (this *ConsistentHash) adjust() {
 	this.vnodes = make(iVNodeArray, 2*len(this.rnodes)*this.vprNum)
 	totalWeight := 0
 	for _, v := range this.rnodes {
-		totalWeight += v.weight
+		totalWeight += v.Weight
 	}
 	for k, v := range this.rnodes {
-		j := int(math.Floor((float64(v.weight) / float64(totalWeight)) * float64(len(this.rnodes)) * float64(this.vprNum)))
+		j := int(math.Floor((float64(v.Weight) / float64(totalWeight)) * float64(len(this.rnodes)) * float64(this.vprNum)))
 		for i := 0; i < j; i++ {
 			key := hash(k + "#" + strconv.Itoa(i))
 			this.vnodes = append(this.vnodes, iVNode{key, k})

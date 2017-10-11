@@ -1,7 +1,6 @@
 package rpc
 
 import (
-	"fmt"
 	"net"
 	"reflect"
 	"strings"
@@ -36,7 +35,6 @@ func NewServer(addr string) *Server {
 func (s *Server) Start() {
 	var err error
 	s.listener, err = net.Listen("tcp", s.addr)
-	fmt.Println("Start Listen.")
 	if err != nil {
 		panic(err)
 	}
@@ -74,7 +72,6 @@ func (s *Server) handleConn(conn net.Conn) {
 		req := &Request{}
 		err := read(req, conn)
 		if err != nil {
-			fmt.Println("disconnect:", conn.RemoteAddr(), err)
 			break
 		} else {
 			go s.call(conn, req, sendMutex)
