@@ -74,7 +74,8 @@ func (s *Server) handleConn(conn net.Conn) {
 		req := &Request{}
 		err := read(req, conn)
 		if err != nil {
-			fmt.Println(err)
+			fmt.Println("disconnect:", conn.RemoteAddr(), err)
+			break
 		} else {
 			go s.call(conn, req, sendMutex)
 		}
@@ -94,8 +95,17 @@ func (s *Server) call(conn net.Conn, req *Request, sendMutex *sync.Mutex) {
 				args = append(args, reflect.ValueOf(v))
 			}
 			rtn := imethod.method.Func.Call(args)
+			replys := make([]interface{}, 0)
+			for _, v := range rtn {
+				replys = append(replys, v.Interface())
+			}
+			rsp := &Response{
+				Seq:   req.Seq,
+				Name:  req.Name,
+				Reply: replys,
+			}
 			sendMutex.Lock()
-			write(rtn, conn)
+			write(rsp, conn)
 			sendMutex.Unlock()
 		}
 	}

@@ -9,15 +9,15 @@ import (
 )
 
 type Request struct {
-	seq  uint64
+	Seq  uint64
 	Name string
-	Args interface{}
+	Args []interface{}
 }
 
 type Response struct {
-	seq   uint64
+	Seq   uint64
 	Name  string
-	Reply interface{}
+	Reply []interface{}
 }
 
 func read(ob interface{}, conn net.Conn) (err error) {

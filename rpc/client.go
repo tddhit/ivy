@@ -7,8 +7,8 @@ import (
 )
 
 type Call struct {
-	Req   Request
-	Rsp   Response
+	Req   *Request
+	Rsp   *Response
 	Done  chan *Call
 	Error error
 }
@@ -38,18 +38,19 @@ func NewClient(addr string) (*Client, error) {
 
 func (c *Client) handleRsp() {
 	var err error
-	var rsp Response
+	//var rsp Response
 	for err == nil {
-		rsp = Response{}
-		err = read(&rsp, c.conn)
+		rsp := &Response{}
+		err = read(rsp, c.conn)
 		if err != nil {
 			break
 		}
-		seq := rsp.seq
+		seq := rsp.Seq
 		c.mutex.Lock()
 		call := c.pending[seq]
 		delete(c.pending, seq)
 		c.mutex.Unlock()
+		call.Rsp = rsp
 		call.Done <- call
 	}
 	c.Close()
@@ -67,10 +68,9 @@ func (c *Client) Close() {
 	c.reqMutex.Unlock()
 }
 
-func (c *Client) Call(name string, args interface{}) *Call {
+func (c *Client) Call(name string, args ...interface{}) *Call {
 	call := &Call{
-		Req:  Request{Name: name, Args: args},
-		Rsp:  Response{Name: name},
+		Req:  &Request{Name: name, Args: args},
 		Done: make(chan *Call),
 	}
 	c.send(call)
@@ -87,7 +87,7 @@ func (c *Client) send(call *Call) {
 	c.pending[seq] = call
 	c.mutex.Unlock()
 
-	call.Req.seq = seq
+	call.Req.Seq = seq
 	if err := write(call.Req, c.conn); err != nil {
 		c.mutex.Lock()
 		call = c.pending[seq]

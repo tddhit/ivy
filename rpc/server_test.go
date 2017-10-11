@@ -7,8 +7,8 @@ import (
 type Math struct {
 }
 
-func (m Math) Add(i, j int) int {
-	return i + j
+func (m Math) Add(i, j, k int) int {
+	return i + j + k
 }
 
 func TestServer(t *testing.T) {
