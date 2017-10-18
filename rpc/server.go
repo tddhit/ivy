@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"log"
 	"net"
 	"reflect"
 	"strings"
@@ -50,6 +51,7 @@ func (s *Server) Start() {
 
 func (s *Server) Register(receiver interface{}) {
 	itype := reflect.TypeOf(receiver)
+	ivalue := reflect.ValueOf(receiver)
 	methods := make(map[string]*iMethod)
 	for i := 0; i < itype.NumMethod(); i++ {
 		m := itype.Method(i)
@@ -57,13 +59,15 @@ func (s *Server) Register(receiver interface{}) {
 			method: m,
 		}
 	}
+	log.Println(methods)
 	sve := &iService{
 		method: methods,
 		itype:  itype,
-		ivalue: reflect.ValueOf(receiver),
-		name:   itype.Name(),
+		ivalue: ivalue,
+		name:   reflect.Indirect(ivalue).Type().Name(),
 	}
 	s.service[sve.name] = sve
+	log.Println(sve)
 }
 
 func (s *Server) handleConn(conn net.Conn) {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/gob"
+	"errors"
 	"io"
 	"net"
 )
@@ -47,6 +48,10 @@ func write(ob interface{}, conn net.Conn) (err error) {
 	buf := make([]byte, 4+len(encbuf.Bytes()))
 	binary.LittleEndian.PutUint32(buf[0:4], uint32(len(encbuf.Bytes())))
 	copy(buf[4:], encbuf.Bytes())
-	_, err = conn.Write(buf)
+	if conn != nil {
+		_, err = conn.Write(buf)
+	} else {
+		err = errors.New("can't connect")
+	}
 	return
 }
