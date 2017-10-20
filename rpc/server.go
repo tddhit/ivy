@@ -1,7 +1,6 @@
 package rpc
 
 import (
-	"log"
 	"net"
 	"reflect"
 	"strings"
@@ -59,7 +58,6 @@ func (s *Server) Register(receiver interface{}) {
 			method: m,
 		}
 	}
-	log.Println(methods)
 	sve := &iService{
 		method: methods,
 		itype:  itype,
@@ -67,7 +65,6 @@ func (s *Server) Register(receiver interface{}) {
 		name:   reflect.Indirect(ivalue).Type().Name(),
 	}
 	s.service[sve.name] = sve
-	log.Println(sve)
 }
 
 func (s *Server) handleConn(conn net.Conn) {

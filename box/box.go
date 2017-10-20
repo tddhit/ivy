@@ -12,8 +12,21 @@ import (
 
 type Box struct {
 	mutex    sync.Mutex
-	RaftNode *raft.Raft
+	raftNode *raft.Raft
+	applyCh  chan *raft.ApplyMsg
 	kv       map[string]string
+}
+
+const (
+	SET = iota
+	GET
+	DELETE
+)
+
+type Op struct {
+	Kind  int
+	Key   string
+	Value string
 }
 
 func NewBox() *Box {
@@ -22,24 +35,44 @@ func NewBox() *Box {
 	peers = append(peers, "127.0.0.1:4871")
 	peers = append(peers, "127.0.0.1:5871")
 	me := os.Args[1]
+	meBytes := []byte(me)
+	meBytes[len(meBytes)-1] = '1'
+	me = string(meBytes)
 	b := &Box{
-		mutex:    sync.Mutex{},
-		RaftNode: raft.NewRaft(peers, me),
-		kv:       make(map[string]string),
+		mutex:   sync.Mutex{},
+		applyCh: make(chan *raft.ApplyMsg, 100),
+		kv:      make(map[string]string),
 	}
-	log.Printf("RaftNode:%p\n", &(b.RaftNode))
-	log.Printf("Box:%p\n", b)
+	b.raftNode = raft.NewRaft(peers, me, b.applyCh)
 	gob.Register(raft.RequestVoteArgs{})
 	gob.Register(raft.RequestVoteReply{})
 	gob.Register(raft.AppendEntriesArgs{})
 	gob.Register(raft.AppendEntriesReply{})
+	go func() {
+		select {
+		case applyMsg := <-b.applyCh:
+			op := applyMsg.Command.(Op)
+			if op.Kind == SET {
+				b.set(op.Key, op.Value)
+			}
+		}
+	}()
 	return b
+}
+
+func (b *Box) set(key, value string) {
+	b.kv[key] = value
 }
 
 func (b *Box) Set(key, value string) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	b.kv[key] = value
+	op := Op{
+		Kind:  SET,
+		Key:   key,
+		Value: value,
+	}
+	b.raftNode.AppendCommand(op)
 }
 
 func (b *Box) Get(key string) (string, error) {
@@ -66,13 +99,10 @@ func (b *Box) Delete(key string) error {
 func main() {
 	log.SetFlags(log.Lshortfile | log.LstdFlags | log.Lmicroseconds)
 	b := NewBox()
-	log.Printf("Box:%p\n", b)
 	if len(os.Args) < 2 {
 		panic("usage:./box ip:port")
 	}
 	s := rpc.NewServer(os.Args[1])
 	s.Register(b)
-	log.Printf("!%p\n", &(b.RaftNode))
-	s.Register(b.RaftNode)
 	s.Start()
 }
