@@ -8,12 +8,14 @@ import (
 	"log"
 	"os"
 	"sync"
+	"time"
 )
 
 type Box struct {
 	mutex    sync.Mutex
 	raftNode *raft.Raft
-	applyCh  chan *raft.ApplyMsg
+	applyCh  chan raft.ApplyMsg
+	appendCh map[int]chan Op
 	kv       map[string]string
 }
 
@@ -39,21 +41,24 @@ func NewBox() *Box {
 	meBytes[len(meBytes)-1] = '1'
 	me = string(meBytes)
 	b := &Box{
-		mutex:   sync.Mutex{},
-		applyCh: make(chan *raft.ApplyMsg, 100),
-		kv:      make(map[string]string),
+		mutex:    sync.Mutex{},
+		applyCh:  make(chan raft.ApplyMsg, 100),
+		appendCh: make(map[int]chan Op),
+		kv:       make(map[string]string),
 	}
 	b.raftNode = raft.NewRaft(peers, me, b.applyCh)
-	gob.Register(raft.RequestVoteArgs{})
-	gob.Register(raft.RequestVoteReply{})
-	gob.Register(raft.AppendEntriesArgs{})
-	gob.Register(raft.AppendEntriesReply{})
+	gob.Register(Op{})
 	go func() {
 		select {
 		case applyMsg := <-b.applyCh:
 			op := applyMsg.Command.(Op)
 			if op.Kind == SET {
 				b.set(op.Key, op.Value)
+				_, ok := b.appendCh[applyMsg.LogIndex]
+				if !ok {
+					b.appendCh[applyMsg.LogIndex] = make(chan Op, 100)
+				}
+				b.appendCh[applyMsg.LogIndex] <- op
 			}
 		}
 	}()
@@ -72,7 +77,19 @@ func (b *Box) Set(key, value string) {
 		Key:   key,
 		Value: value,
 	}
-	b.raftNode.AppendCommand(op)
+	logIndex, isLeader := b.raftNode.AppendCommand(op)
+	if isLeader {
+		_, ok := b.appendCh[logIndex]
+		if !ok {
+			b.appendCh[logIndex] = make(chan Op, 100)
+		}
+		select {
+		case <-b.appendCh[logIndex]:
+			log.Println("set success")
+		case <-time.After(3500 * time.Millisecond):
+			log.Println("set failed")
+		}
+	}
 }
 
 func (b *Box) Get(key string) (string, error) {

@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"encoding/gob"
 	"github.com/tddhit/ivy/rpc"
 	"log"
 	"sync"
@@ -47,7 +48,8 @@ type LogEntry struct {
 }
 
 type ApplyMsg struct {
-	Command interface{}
+	LogIndex int
+	Command  interface{}
 }
 
 type Raft struct {
@@ -72,18 +74,23 @@ type Raft struct {
 	voteGrantedCh chan bool
 	leaderCh      chan bool
 	commitCh      chan bool
-	applyCh       chan<- *ApplyMsg
+	applyCh       chan<- ApplyMsg
 }
 
-func (r *Raft) AppendCommand(command interface{}) {
+func (r *Raft) AppendCommand(command interface{}) (index int, isLeader bool) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	if r.role != LEADER {
+		return 0, false
+	}
 	logEntry := LogEntry{
 		LogIndex: r.log[len(r.log)-1].LogIndex + 1,
 		LogTerm:  r.currentTerm,
 		Command:  command,
 	}
 	r.log = append(r.log, logEntry)
+	go r.broadcastAppendEntries()
+	return logEntry.LogIndex, true
 }
 
 func (r *Raft) RequestVote(args RequestVoteArgs) (reply RequestVoteReply) {
@@ -229,6 +236,7 @@ func (r *Raft) sendAppendEntries(id int, peer *rpc.Client, args AppendEntriesArg
 	select {
 	case call := <-reply.Done:
 		if call.Error != nil {
+			log.Println(call.Error)
 			peer.Dial()
 		} else {
 			r.mutex.Lock()
@@ -252,7 +260,7 @@ func (r *Raft) sendAppendEntries(id int, peer *rpc.Client, args AppendEntriesArg
 			}
 			commitCount := 1
 			N := r.commitIndex
-			for i := r.commitIndex + 1; i < r.log[len(r.log)-1].LogIndex; i++ {
+			for i := r.commitIndex + 1; i <= r.log[len(r.log)-1].LogIndex; i++ {
 				for j := 0; j < len(r.peers); j++ {
 					if r.matchIndex[j] >= i {
 						commitCount++
@@ -262,7 +270,7 @@ func (r *Raft) sendAppendEntries(id int, peer *rpc.Client, args AppendEntriesArg
 					N = i
 				}
 			}
-			if r.currentTerm != N {
+			if r.commitIndex != N {
 				r.commitIndex = N
 				r.commitCh <- true
 			}
@@ -291,7 +299,7 @@ func (r *Raft) broadcastAppendEntries() {
 	}
 }
 
-func NewRaft(addrs []string, me string, applyCh chan<- *ApplyMsg) *Raft {
+func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 	var id int
 	peers := make([]*rpc.Client, len(addrs))
 	for k, v := range addrs {
@@ -322,6 +330,10 @@ func NewRaft(addrs []string, me string, applyCh chan<- *ApplyMsg) *Raft {
 		applyCh:       applyCh,
 	}
 	raft.log = append(raft.log, LogEntry{LogTerm: 0})
+	gob.Register(RequestVoteArgs{})
+	gob.Register(RequestVoteReply{})
+	gob.Register(AppendEntriesArgs{})
+	gob.Register(AppendEntriesReply{})
 	go func() {
 		for {
 			switch raft.role {
@@ -369,11 +381,15 @@ func NewRaft(addrs []string, me string, applyCh chan<- *ApplyMsg) *Raft {
 		for {
 			select {
 			case <-raft.commitCh:
+				log.Println("receive commitCh")
 				baseLogIndex := raft.log[0].LogIndex
 				if raft.commitIndex > raft.lastApplied {
 					for i := raft.lastApplied + 1; i <= raft.commitIndex; i++ {
 						raft.lastApplied++
-						applyMsg := &ApplyMsg{Command: raft.log[i-baseLogIndex]}
+						applyMsg := ApplyMsg{
+							LogIndex: i,
+							Command:  raft.log[i-baseLogIndex].Command,
+						}
 						raft.applyCh <- applyMsg
 					}
 				}

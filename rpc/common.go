@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"errors"
 	"io"
+	"log"
 	"net"
 )
 
@@ -43,6 +44,7 @@ func write(ob interface{}, conn net.Conn) (err error) {
 	var encbuf bytes.Buffer
 	enc := gob.NewEncoder(&encbuf)
 	if err = enc.Encode(ob); err != nil {
+		log.Println("!!", err)
 		return
 	}
 	buf := make([]byte, 4+len(encbuf.Bytes()))
