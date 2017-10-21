@@ -4,6 +4,7 @@ import (
 	"encoding/gob"
 	"github.com/tddhit/ivy/rpc"
 	"log"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -334,6 +335,8 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 	gob.Register(RequestVoteReply{})
 	gob.Register(AppendEntriesArgs{})
 	gob.Register(AppendEntriesReply{})
+	rand.Seed(time.Now().UnixNano())
+	time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
 	go func() {
 		for {
 			switch raft.role {
@@ -367,13 +370,13 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 					raft.mutex.Lock()
 					raft.role = FOLLOWER
 					raft.mutex.Unlock()
-				case <-time.After(1500 * time.Millisecond):
+				case <-time.After(time.Duration(rand.Intn(151)+150) * time.Millisecond):
 					log.Println("vote timeout...")
 				}
 			case LEADER:
 				log.Println("I am leader...")
 				raft.broadcastAppendEntries()
-				time.Sleep(1000 * time.Millisecond)
+				time.Sleep(500 * time.Millisecond)
 			}
 		}
 	}()
@@ -381,7 +384,6 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 		for {
 			select {
 			case <-raft.commitCh:
-				log.Println("receive commitCh")
 				baseLogIndex := raft.log[0].LogIndex
 				if raft.commitIndex > raft.lastApplied {
 					for i := raft.lastApplied + 1; i <= raft.commitIndex; i++ {

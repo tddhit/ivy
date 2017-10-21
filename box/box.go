@@ -49,16 +49,18 @@ func NewBox() *Box {
 	b.raftNode = raft.NewRaft(peers, me, b.applyCh)
 	gob.Register(Op{})
 	go func() {
-		select {
-		case applyMsg := <-b.applyCh:
-			op := applyMsg.Command.(Op)
-			if op.Kind == SET {
-				b.set(op.Key, op.Value)
-				_, ok := b.appendCh[applyMsg.LogIndex]
-				if !ok {
-					b.appendCh[applyMsg.LogIndex] = make(chan Op, 100)
+		for {
+			select {
+			case applyMsg := <-b.applyCh:
+				op := applyMsg.Command.(Op)
+				if op.Kind == SET {
+					b.set(op.Key, op.Value)
+					_, ok := b.appendCh[applyMsg.LogIndex]
+					if !ok {
+						b.appendCh[applyMsg.LogIndex] = make(chan Op, 100)
+					}
+					b.appendCh[applyMsg.LogIndex] <- op
 				}
-				b.appendCh[applyMsg.LogIndex] <- op
 			}
 		}
 	}()
