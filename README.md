@@ -7,5 +7,4 @@ distributed kv storage
 - [ ] Raft协议
     - [x] 选主
     - [x] 日志复制
-    - [x] 日志压缩
     - [ ] 成员关系变更
