@@ -28,7 +28,7 @@ func NewLeveldb(dbpath string) (*Leveldb, error) {
 	return ldb, nil
 }
 
-func (ldb *Leveldb) Put(entry *LogEntry) (err error) {
+func (ldb *Leveldb) PutLog(entry *LogEntry) (err error) {
 	key := fmt.Sprintf("LogIndex_%d", entry.LogIndex)
 	var encbuf bytes.Buffer
 	enc := gob.NewEncoder(&encbuf)
@@ -57,7 +57,7 @@ func (ldb *Leveldb) BatchGet(start int) []LogEntry {
 	return entries
 }
 
-func (ldb *Leveldb) Get(index int) (*LogEntry, error) {
+func (ldb *Leveldb) GetLog(index int) (*LogEntry, error) {
 	key := fmt.Sprintf("LogIndex_%d", index)
 	buf, err := ldb.db.Get([]byte(key), nil)
 	if err != nil {
@@ -70,4 +70,21 @@ func (ldb *Leveldb) Get(index int) (*LogEntry, error) {
 		return nil, err
 	}
 	return entry, nil
+}
+
+func (ldb *Leveldb) Get(key string) (string, error) {
+	return ldb.db.Get([]byte(key), nil)
+}
+
+func (ldb *Leveldb) DeleteLog(start int, end int) {
+	startKey := fmt.Sprintf("LogIndex_%d", start)
+	endKey := fmt.Sprintf("LogIndex_%d", end)
+	iter := ldb.db.NewIterator(&leveldbUtil.Range{Start: []byte(startKey), Limit: []byte(endKey)}, nil)
+	for iter.Next() {
+		ldb.db.Delete(iter.Key())
+	}
+	iter.Release()
+}
+
+func (ldb *Leveldb) Put(key, value string) {
 }

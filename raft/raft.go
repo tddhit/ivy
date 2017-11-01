@@ -37,20 +37,6 @@ type AppendEntriesReply struct {
 	Success   bool
 }
 
-type InstallSnapshotArgs struct {
-	Term              int
-	LeaderId          int
-	LastIncludedIndex int
-	LastIncludedTerm  int
-	offset            int
-	data              []LogEntry
-	done              bool
-}
-
-type InstallSnapshotReply struct {
-	Term int
-}
-
 const (
 	FOLLOWER = iota
 	CANDIDATE
@@ -108,8 +94,7 @@ func (r *Raft) AppendCommand(command interface{}) (index int, isLeader bool) {
 		LogTerm:  r.currentTerm,
 		Command:  command,
 	}
-	r.put(entry)
-	log.Println("appendCommand:", entry)
+	r.writeLog(entry)
 	go r.broadcastAppendEntries()
 	return entry.LogIndex, true
 }
@@ -126,6 +111,7 @@ func (r *Raft) RequestVote(args RequestVoteArgs) (reply RequestVoteReply) {
 		r.role = FOLLOWER
 		r.currentTerm = args.Term
 		r.votedFor = -1
+		r.saveMetadata()
 	}
 	reply.Term = args.Term
 	var upToDate = false
@@ -139,6 +125,7 @@ func (r *Raft) RequestVote(args RequestVoteArgs) (reply RequestVoteReply) {
 		r.role = FOLLOWER
 		r.votedFor = args.CandidateId
 		r.voteGrantedCh <- true
+		r.saveMetadata()
 	}
 	return
 }
@@ -156,6 +143,7 @@ func (r *Raft) sendRequestVote(peer *rpc.Client, args RequestVoteArgs) {
 				r.role = FOLLOWER
 				r.currentTerm = requestVoteReply.Term
 				r.votedFor = -1
+				r.saveMetadata()
 			}
 			if requestVoteReply.VoteGranted {
 				r.voteCount++
@@ -189,7 +177,6 @@ func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) 
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	log.Println("append:", args)
 	r.heartbeatCh <- true
 	if args.Term < r.currentTerm {
 		reply.Success = false
@@ -200,6 +187,7 @@ func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) 
 		r.role = FOLLOWER
 		r.currentTerm = args.Term
 		r.votedFor = -1
+		r.saveMetadata()
 	}
 	if len(args.Entries) == 0 {
 		reply.Term = args.Term
@@ -220,20 +208,26 @@ func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) 
 		reply.Success = false
 		return
 	}
-	if args.PrevLogIndex > r.baseLogIndex {
-		prevLogEntry, _ := r.storage.Get(args.PrevLogIndex)
-		if args.PrevLogTerm != prevLogEntry.LogTerm {
-			for i := args.PrevLogIndex - 1; i >= r.baseLogIndex; i-- {
-				entry, _ := r.storage.Get(i)
-				if entry.LogTerm != prevLogEntry.LogTerm {
-					reply.NextIndex = i + 1
-					reply.Term = args.Term
-					reply.Success = false
-					return
-				}
+	prevLogEntry, err := r.storage.Get(args.PrevLogIndex)
+	if err != nil {
+		panic(err)
+	}
+	if args.PrevLogTerm != prevLogEntry.LogTerm {
+		for i := args.PrevLogIndex - 1; i >= r.baseLogIndex; i-- {
+			entry, err := r.storage.Get(i)
+			if err != nil {
+				panic(err)
+			}
+			if entry.LogTerm != prevLogEntry.LogTerm {
+				reply.NextIndex = i + 1
+				reply.Term = args.Term
+				reply.Success = false
+				break
 			}
 		}
+		return
 	}
+	r.storage.DeleteLog(args.PrevLogTerm+1, r.lastLogIndex)
 	for _, entry := range args.Entries {
 		r.put(&entry)
 	}
@@ -264,6 +258,7 @@ func (r *Raft) sendAppendEntries(id int, peer *rpc.Client, args AppendEntriesArg
 				r.role = FOLLOWER
 				r.currentTerm = appendEntriesReply.Term
 				r.votedFor = -1
+				r.saveMetadata()
 				return
 			} else {
 				if len(args.Entries) == 0 {
@@ -311,9 +306,17 @@ func (r *Raft) broadcastAppendEntries() {
 		prevLogEntry, _ := r.storage.Get(args.PrevLogIndex)
 		args.PrevLogTerm = prevLogEntry.LogTerm
 		args.Entries = r.storage.BatchGet(args.PrevLogIndex + 1)
-		log.Println("broadcast:", args)
 		go r.sendAppendEntries(i, r.peers[i], args)
 	}
+}
+
+func (r *Raft) saveMetadata() {
+	r.storage.Put("currentTerm", strconv.Itoa(r.currentTerm))
+	r.storage.Put("votedFor", strconv.Itoa(r.votedFor))
+	r.storage.Put("lastApplied", strconv.Itoa(r.lastApplied))
+}
+
+func (r *Raft) truncateLog() {
 }
 
 func (r *Raft) put(entry *LogEntry) error {
@@ -321,6 +324,22 @@ func (r *Raft) put(entry *LogEntry) error {
 	r.lastLogTerm = entry.LogTerm
 	r.baseLogIndex = 1
 	return r.storage.Put(entry)
+}
+
+func (r *Raft) Recover() {
+	currentTerm, err := r.storage.Get("currentTerm")
+	if err == nil {
+		r.currentTerm = strconv.Atoi(currentTerm)
+	}
+	votedFor, err := r.storage.Get("votedFor")
+	if err == nil {
+		r.votedFor = strconv.Atoi(votedFor)
+	}
+	lastApplied, err := r.storage.Get("lastApplied")
+	if err == nil {
+		r.lastApplied = strconv.Atoi(lastApplied)
+		r.commitIndex = r.lastApplied
+	}
 }
 
 func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
@@ -358,6 +377,7 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 	}
 	raft.storage = db
 	raft.put(&LogEntry{LogIndex: 0, LogTerm: 0})
+	raft.Recover()
 	gob.Register(RequestVoteArgs{})
 	gob.Register(RequestVoteReply{})
 	gob.Register(AppendEntriesArgs{})
@@ -382,6 +402,7 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 				raft.currentTerm++
 				raft.votedFor = raft.id
 				raft.voteCount = 1
+				raft.saveMetadata()
 				raft.mutex.Unlock()
 				go raft.broadcastRequestVote()
 				select {
@@ -415,6 +436,7 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 					for i := raft.lastApplied + 1; i <= raft.commitIndex; i++ {
 						entry, _ := raft.storage.Get(i)
 						raft.lastApplied++
+						raft.saveMetadata()
 						applyMsg := ApplyMsg{
 							LogIndex: i,
 							Command:  entry.Command,
