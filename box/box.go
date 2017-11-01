@@ -94,14 +94,11 @@ func (b *Box) Set(key, value string) {
 	}
 }
 
-func (b *Box) Get(key string) (string, error) {
+func (b *Box) Get(key string) (value string, ok bool) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	if value, ok := b.kv[key]; ok {
-		return value, nil
-	} else {
-		return "", errors.New("not found.")
-	}
+	value, ok = b.kv[key]
+	return
 }
 
 func (b *Box) Delete(key string) error {
