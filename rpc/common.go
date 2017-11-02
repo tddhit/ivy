@@ -41,6 +41,7 @@ func read(ob interface{}, conn net.Conn) (err error) {
 }
 
 func write(ob interface{}, conn net.Conn) (err error) {
+	log.Println(ob)
 	var encbuf bytes.Buffer
 	enc := gob.NewEncoder(&encbuf)
 	if err = enc.Encode(ob); err != nil {

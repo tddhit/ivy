@@ -41,7 +41,7 @@ func NewBox() *Box {
 	meBytes[len(meBytes)-1] = '1'
 	me = string(meBytes)
 	gob.Register(Op{})
-	db, err := leveldb.OpenFile("/tmp/box.db_"+me, nil)
+	db, err := leveldb.OpenFile("/tmp/box.db_"+string(meBytes[len(meBytes)-4:]), nil)
 	if err != nil {
 		panic(err)
 	}
@@ -83,6 +83,7 @@ func (b *Box) Set(key, value string) {
 		Key:   key,
 		Value: value,
 	}
+	log.Println("!!!!!!!!!!!Set:", op)
 	logIndex, isLeader := b.raftNode.AppendCommand(op)
 	if isLeader {
 		_, ok := b.appendCh[logIndex]
@@ -98,11 +99,14 @@ func (b *Box) Set(key, value string) {
 	}
 }
 
-func (b *Box) Get(key string) (string, error) {
+func (b *Box) Get(key string) (string, bool) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	value, err := b.db.Get([]byte(key), nil)
-	return string(value), err
+	if err != nil {
+		return "", false
+	}
+	return string(value), true
 }
 
 func (b *Box) Delete(key string) error {

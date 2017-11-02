@@ -1,6 +1,7 @@
 package rpc
 
 import (
+	"log"
 	"net"
 	"reflect"
 	"strings"
@@ -82,6 +83,7 @@ func (s *Server) handleConn(conn net.Conn) {
 }
 
 func (s *Server) call(conn net.Conn, req *Request, sendMutex *sync.Mutex) {
+	log.Println("!!!!!!!!!!!!call:", req)
 	dot := strings.LastIndex(req.Name, ".")
 	sveName := req.Name[:dot]
 	methodName := req.Name[dot+1:]
@@ -92,6 +94,7 @@ func (s *Server) call(conn net.Conn, req *Request, sendMutex *sync.Mutex) {
 			for _, v := range req.Args {
 				args = append(args, reflect.ValueOf(v))
 			}
+			log.Println("!!!!!!args:", args)
 			rtn := imethod.method.Func.Call(args)
 			replys := make([]interface{}, 0)
 			for _, v := range rtn {

@@ -96,6 +96,7 @@ func (r *Raft) AppendCommand(command interface{}) (index int, isLeader bool) {
 		Command:  command,
 	}
 	r.putLog(entry)
+	log.Println("!!!!!!!!!!!!!!appendCommand:", entry)
 	go r.broadcastAppendEntries()
 	return entry.LogIndex, true
 }
@@ -177,6 +178,7 @@ func (r *Raft) broadcastRequestVote() {
 func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+	log.Println("append:", args)
 
 	r.heartbeatCh <- true
 	if args.Term < r.currentTerm {
@@ -189,19 +191,6 @@ func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) 
 		r.currentTerm = args.Term
 		r.votedFor = -1
 		r.saveRaftState()
-	}
-	if len(args.Entries) == 0 {
-		reply.Term = args.Term
-		reply.Success = true
-		return
-	}
-	if r.lastLogIndex == 0 {
-		for _, entry := range args.Entries {
-			r.putLog(&entry)
-		}
-		reply.Term = args.Term
-		reply.Success = true
-		return
 	}
 	if args.PrevLogIndex > r.lastLogIndex {
 		reply.NextIndex = r.lastLogIndex + 1
@@ -228,18 +217,23 @@ func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) 
 		}
 		return
 	}
-	r.storage.DeleteLog(args.PrevLogTerm+1, r.lastLogIndex)
+	if args.PrevLogIndex < r.lastLogIndex {
+		r.storage.DeleteLog(args.PrevLogIndex+1, r.lastLogIndex+1)
+	}
 	for _, entry := range args.Entries {
 		r.putLog(&entry)
 	}
 	reply.Term = args.Term
 	reply.Success = true
+	log.Println("11111111111:", args.LeaderCommit, r.commitIndex, r.lastLogIndex)
 	if args.LeaderCommit > r.commitIndex {
 		if args.LeaderCommit > r.lastLogIndex {
 			r.commitIndex = r.lastLogIndex
 		} else {
 			r.commitIndex = args.LeaderCommit
 		}
+		log.Println("222222222222:", args.LeaderCommit, r.commitIndex, r.lastLogIndex)
+		r.commitCh <- true
 	}
 	return
 }
@@ -307,10 +301,11 @@ func (r *Raft) broadcastAppendEntries() {
 		if r.nextIndex[i] > r.baseLogIndex {
 			prevLogEntry, _ := r.storage.GetLog(args.PrevLogIndex)
 			args.PrevLogTerm = prevLogEntry.LogTerm
-			args.Entries = r.storage.GetRangeLog(args.PrevLogIndex+1, r.lastLogIndex)
+			args.Entries = r.storage.GetRangeLog(args.PrevLogIndex+1, r.lastLogIndex+1)
+			log.Println("broadcast:", args, args.PrevLogIndex, r.lastLogIndex)
 			go r.sendAppendEntries(i, r.peers[i], args)
 		} else {
-			fmt.Println("need manual!")
+			fmt.Println("!!!!!!!!!!need manual!")
 		}
 	}
 }
@@ -349,8 +344,8 @@ func (r *Raft) Recover() {
 	r.lastLogTerm = lastEntry.LogTerm
 	baseLogIndex := firstEntry.LogIndex
 	r.storage.DeleteLog(baseLogIndex, r.lastApplied)
-	r.putLog(&LogEntry{LogIndex: r.lastApplied, LogTerm: r.lastLogTerm})
 	r.baseLogIndex = r.lastApplied
+	log.Println("Recover:", r.currentTerm, r.votedFor, r.lastApplied, r.lastLogIndex, r.lastLogTerm, r.baseLogIndex)
 }
 
 func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
@@ -442,9 +437,11 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 		for {
 			select {
 			case <-raft.commitCh:
+				log.Println("333333333:", raft.commitIndex, raft.lastApplied)
 				if raft.commitIndex > raft.lastApplied {
 					for i := raft.lastApplied + 1; i <= raft.commitIndex; i++ {
 						entry, _ := raft.storage.GetLog(i)
+						fmt.Println("entry:", entry)
 						raft.lastApplied++
 						raft.saveMetadata()
 						applyMsg := ApplyMsg{
