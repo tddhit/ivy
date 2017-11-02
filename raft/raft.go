@@ -1,9 +1,8 @@
 package raft
 
 import (
-	"fmt"
-
 	"encoding/gob"
+	"fmt"
 	"github.com/tddhit/ivy/rpc"
 	"log"
 	"math/rand"
@@ -345,11 +344,10 @@ func (r *Raft) Recover() {
 		r.lastApplied, _ = strconv.Atoi(lastApplied)
 		r.commitIndex = r.lastApplied
 	}
-	entry := r.storage.LastLog()
-	r.lastLogIndex = entry.LogIndex
-	r.lastLogTerm = entry.LogTerm
-	entry = r.storage.FirstLog()
-	baseLogIndex := entry.LogIndex
+	firstEntry, lastEntry := r.storage.GetFirstAndLastLog()
+	r.lastLogIndex = lastEntry.LogIndex
+	r.lastLogTerm = lastEntry.LogTerm
+	baseLogIndex := firstEntry.LogIndex
 	r.storage.DeleteLog(baseLogIndex, r.lastApplied)
 	r.putLog(&LogEntry{LogIndex: r.lastApplied, LogTerm: r.lastLogTerm})
 	r.baseLogIndex = r.lastApplied

@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/gob"
-	"errors"
+	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tddhit/ivy/raft"
 	"github.com/tddhit/ivy/rpc"
 	"log"
@@ -16,7 +16,7 @@ type Box struct {
 	raftNode *raft.Raft
 	applyCh  chan raft.ApplyMsg
 	appendCh map[int]chan Op
-	kv       map[string]string
+	db       *leveldb.DB
 }
 
 const (
@@ -40,14 +40,18 @@ func NewBox() *Box {
 	meBytes := []byte(me)
 	meBytes[len(meBytes)-1] = '1'
 	me = string(meBytes)
+	gob.Register(Op{})
+	db, err := leveldb.OpenFile("/tmp/box.db_"+me, nil)
+	if err != nil {
+		panic(err)
+	}
 	b := &Box{
 		mutex:    sync.Mutex{},
 		applyCh:  make(chan raft.ApplyMsg, 100),
 		appendCh: make(map[int]chan Op),
-		kv:       make(map[string]string),
+		db:       db,
 	}
 	b.raftNode = raft.NewRaft(peers, me, b.applyCh)
-	gob.Register(Op{})
 	go func() {
 		for {
 			select {
@@ -68,7 +72,7 @@ func NewBox() *Box {
 }
 
 func (b *Box) set(key, value string) {
-	b.kv[key] = value
+	b.db.Put([]byte(key), []byte(value), nil)
 }
 
 func (b *Box) Set(key, value string) {
@@ -94,22 +98,17 @@ func (b *Box) Set(key, value string) {
 	}
 }
 
-func (b *Box) Get(key string) (value string, ok bool) {
+func (b *Box) Get(key string) (string, error) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	value, ok = b.kv[key]
-	return
+	value, err := b.db.Get([]byte(key), nil)
+	return string(value), err
 }
 
 func (b *Box) Delete(key string) error {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
-	if _, ok := b.kv[key]; ok {
-		delete(b.kv, key)
-		return nil
-	} else {
-		return errors.New("not found.")
-	}
+	return b.db.Delete([]byte(key), nil)
 }
 
 func main() {
