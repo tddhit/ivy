@@ -1,6 +1,8 @@
 package raft
 
 import (
+	"fmt"
+
 	"encoding/gob"
 	"github.com/tddhit/ivy/rpc"
 	"log"
@@ -94,7 +96,7 @@ func (r *Raft) AppendCommand(command interface{}) (index int, isLeader bool) {
 		LogTerm:  r.currentTerm,
 		Command:  command,
 	}
-	r.writeLog(entry)
+	r.putLog(entry)
 	go r.broadcastAppendEntries()
 	return entry.LogIndex, true
 }
@@ -111,7 +113,7 @@ func (r *Raft) RequestVote(args RequestVoteArgs) (reply RequestVoteReply) {
 		r.role = FOLLOWER
 		r.currentTerm = args.Term
 		r.votedFor = -1
-		r.saveMetadata()
+		r.saveRaftState()
 	}
 	reply.Term = args.Term
 	var upToDate = false
@@ -125,7 +127,7 @@ func (r *Raft) RequestVote(args RequestVoteArgs) (reply RequestVoteReply) {
 		r.role = FOLLOWER
 		r.votedFor = args.CandidateId
 		r.voteGrantedCh <- true
-		r.saveMetadata()
+		r.saveRaftState()
 	}
 	return
 }
@@ -143,7 +145,7 @@ func (r *Raft) sendRequestVote(peer *rpc.Client, args RequestVoteArgs) {
 				r.role = FOLLOWER
 				r.currentTerm = requestVoteReply.Term
 				r.votedFor = -1
-				r.saveMetadata()
+				r.saveRaftState()
 			}
 			if requestVoteReply.VoteGranted {
 				r.voteCount++
@@ -187,7 +189,7 @@ func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) 
 		r.role = FOLLOWER
 		r.currentTerm = args.Term
 		r.votedFor = -1
-		r.saveMetadata()
+		r.saveRaftState()
 	}
 	if len(args.Entries) == 0 {
 		reply.Term = args.Term
@@ -196,7 +198,7 @@ func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) 
 	}
 	if r.lastLogIndex == 0 {
 		for _, entry := range args.Entries {
-			r.put(&entry)
+			r.putLog(&entry)
 		}
 		reply.Term = args.Term
 		reply.Success = true
@@ -208,13 +210,13 @@ func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) 
 		reply.Success = false
 		return
 	}
-	prevLogEntry, err := r.storage.Get(args.PrevLogIndex)
+	prevLogEntry, err := r.storage.GetLog(args.PrevLogIndex)
 	if err != nil {
 		panic(err)
 	}
 	if args.PrevLogTerm != prevLogEntry.LogTerm {
 		for i := args.PrevLogIndex - 1; i >= r.baseLogIndex; i-- {
-			entry, err := r.storage.Get(i)
+			entry, err := r.storage.GetLog(i)
 			if err != nil {
 				panic(err)
 			}
@@ -229,7 +231,7 @@ func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) 
 	}
 	r.storage.DeleteLog(args.PrevLogTerm+1, r.lastLogIndex)
 	for _, entry := range args.Entries {
-		r.put(&entry)
+		r.putLog(&entry)
 	}
 	reply.Term = args.Term
 	reply.Success = true
@@ -258,7 +260,7 @@ func (r *Raft) sendAppendEntries(id int, peer *rpc.Client, args AppendEntriesArg
 				r.role = FOLLOWER
 				r.currentTerm = appendEntriesReply.Term
 				r.votedFor = -1
-				r.saveMetadata()
+				r.saveRaftState()
 				return
 			} else {
 				if len(args.Entries) == 0 {
@@ -279,7 +281,7 @@ func (r *Raft) sendAppendEntries(id int, peer *rpc.Client, args AppendEntriesArg
 						commitCount++
 					}
 				}
-				entry, _ := r.storage.Get(i)
+				entry, _ := r.storage.GetLog(i)
 				if commitCount > len(r.peers)/2 && r.currentTerm == entry.LogTerm {
 					N = i
 				}
@@ -303,43 +305,54 @@ func (r *Raft) broadcastAppendEntries() {
 			LeaderCommit: r.commitIndex,
 			PrevLogIndex: r.nextIndex[i] - 1,
 		}
-		prevLogEntry, _ := r.storage.Get(args.PrevLogIndex)
-		args.PrevLogTerm = prevLogEntry.LogTerm
-		args.Entries = r.storage.BatchGet(args.PrevLogIndex + 1)
-		go r.sendAppendEntries(i, r.peers[i], args)
+		if r.nextIndex[i] > r.baseLogIndex {
+			prevLogEntry, _ := r.storage.GetLog(args.PrevLogIndex)
+			args.PrevLogTerm = prevLogEntry.LogTerm
+			args.Entries = r.storage.GetRangeLog(args.PrevLogIndex+1, r.lastLogIndex)
+			go r.sendAppendEntries(i, r.peers[i], args)
+		} else {
+			fmt.Println("need manual!")
+		}
 	}
 }
 
-func (r *Raft) saveMetadata() {
+func (r *Raft) saveRaftState() {
 	r.storage.Put("currentTerm", strconv.Itoa(r.currentTerm))
 	r.storage.Put("votedFor", strconv.Itoa(r.votedFor))
+}
+
+func (r *Raft) saveMetadata() {
 	r.storage.Put("lastApplied", strconv.Itoa(r.lastApplied))
 }
 
-func (r *Raft) truncateLog() {
-}
-
-func (r *Raft) put(entry *LogEntry) error {
+func (r *Raft) putLog(entry *LogEntry) error {
 	r.lastLogIndex = entry.LogIndex
 	r.lastLogTerm = entry.LogTerm
-	r.baseLogIndex = 1
-	return r.storage.Put(entry)
+	return r.storage.PutLog(entry)
 }
 
 func (r *Raft) Recover() {
 	currentTerm, err := r.storage.Get("currentTerm")
 	if err == nil {
-		r.currentTerm = strconv.Atoi(currentTerm)
+		r.currentTerm, _ = strconv.Atoi(currentTerm)
 	}
 	votedFor, err := r.storage.Get("votedFor")
 	if err == nil {
-		r.votedFor = strconv.Atoi(votedFor)
+		r.votedFor, _ = strconv.Atoi(votedFor)
 	}
 	lastApplied, err := r.storage.Get("lastApplied")
 	if err == nil {
-		r.lastApplied = strconv.Atoi(lastApplied)
+		r.lastApplied, _ = strconv.Atoi(lastApplied)
 		r.commitIndex = r.lastApplied
 	}
+	entry := r.storage.LastLog()
+	r.lastLogIndex = entry.LogIndex
+	r.lastLogTerm = entry.LogTerm
+	entry = r.storage.FirstLog()
+	baseLogIndex := entry.LogIndex
+	r.storage.DeleteLog(baseLogIndex, r.lastApplied)
+	r.putLog(&LogEntry{LogIndex: r.lastApplied, LogTerm: r.lastLogTerm})
+	r.baseLogIndex = r.lastApplied
 }
 
 func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
@@ -357,9 +370,13 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 			}
 		}
 	}
+	db, err := NewLeveldb("/tmp/raft.db_" + strconv.Itoa(id))
+	if err != nil {
+		panic(err)
+	}
 	raft := &Raft{
-		mutex:         sync.Mutex{},
 		peers:         peers,
+		storage:       db,
 		id:            id,
 		role:          FOLLOWER,
 		votedFor:      -1,
@@ -371,12 +388,7 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 		commitCh:      make(chan bool, 10),
 		applyCh:       applyCh,
 	}
-	db, err := NewLeveldb("/tmp/raft.db_" + strconv.Itoa(id))
-	if err != nil {
-		panic(err)
-	}
-	raft.storage = db
-	raft.put(&LogEntry{LogIndex: 0, LogTerm: 0})
+	raft.putLog(&LogEntry{LogIndex: 0, LogTerm: 0})
 	raft.Recover()
 	gob.Register(RequestVoteArgs{})
 	gob.Register(RequestVoteReply{})
@@ -402,7 +414,7 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 				raft.currentTerm++
 				raft.votedFor = raft.id
 				raft.voteCount = 1
-				raft.saveMetadata()
+				raft.saveRaftState()
 				raft.mutex.Unlock()
 				go raft.broadcastRequestVote()
 				select {
@@ -434,7 +446,7 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 			case <-raft.commitCh:
 				if raft.commitIndex > raft.lastApplied {
 					for i := raft.lastApplied + 1; i <= raft.commitIndex; i++ {
-						entry, _ := raft.storage.Get(i)
+						entry, _ := raft.storage.GetLog(i)
 						raft.lastApplied++
 						raft.saveMetadata()
 						applyMsg := ApplyMsg{
