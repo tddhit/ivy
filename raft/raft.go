@@ -2,7 +2,6 @@ package raft
 
 import (
 	"encoding/gob"
-	"fmt"
 	"github.com/tddhit/ivy/rpc"
 	"log"
 	"math/rand"
@@ -96,7 +95,6 @@ func (r *Raft) AppendCommand(command interface{}) (index int, isLeader bool) {
 		Command:  command,
 	}
 	r.putLog(entry)
-	log.Println("!!!!!!!!!!!!!!appendCommand:", entry)
 	go r.broadcastAppendEntries()
 	return entry.LogIndex, true
 }
@@ -178,7 +176,6 @@ func (r *Raft) broadcastRequestVote() {
 func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
-	log.Println("append:", args)
 
 	r.heartbeatCh <- true
 	if args.Term < r.currentTerm {
@@ -232,7 +229,6 @@ func (r *Raft) AppendEntries(args AppendEntriesArgs) (reply AppendEntriesReply) 
 		} else {
 			r.commitIndex = args.LeaderCommit
 		}
-		log.Println("222222222222:", args.LeaderCommit, r.commitIndex, r.lastLogIndex)
 		r.commitCh <- true
 	}
 	return
@@ -302,10 +298,8 @@ func (r *Raft) broadcastAppendEntries() {
 			prevLogEntry, _ := r.storage.GetLog(args.PrevLogIndex)
 			args.PrevLogTerm = prevLogEntry.LogTerm
 			args.Entries = r.storage.GetRangeLog(args.PrevLogIndex+1, r.lastLogIndex+1)
-			log.Println("broadcast:", args, args.PrevLogIndex, r.lastLogIndex)
 			go r.sendAppendEntries(i, r.peers[i], args)
 		} else {
-			fmt.Println("!!!!!!!!!!need manual!")
 		}
 	}
 }
@@ -345,7 +339,6 @@ func (r *Raft) Recover() {
 	baseLogIndex := firstEntry.LogIndex
 	r.storage.DeleteLog(baseLogIndex, r.lastApplied)
 	r.baseLogIndex = r.lastApplied
-	log.Println("Recover:", r.currentTerm, r.votedFor, r.lastApplied, r.lastLogIndex, r.lastLogTerm, r.baseLogIndex)
 }
 
 func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
@@ -441,7 +434,6 @@ func NewRaft(addrs []string, me string, applyCh chan<- ApplyMsg) *Raft {
 				if raft.commitIndex > raft.lastApplied {
 					for i := raft.lastApplied + 1; i <= raft.commitIndex; i++ {
 						entry, _ := raft.storage.GetLog(i)
-						fmt.Println("entry:", entry)
 						raft.lastApplied++
 						raft.saveMetadata()
 						applyMsg := ApplyMsg{
