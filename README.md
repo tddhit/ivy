@@ -1,5 +1,3 @@
-![](https://raw.githubusercontent.com/tddhit/ivy/master/doc/ivy.png)
-# ivy
 分布式一致性协议raft实现
 
 ## To-do List
